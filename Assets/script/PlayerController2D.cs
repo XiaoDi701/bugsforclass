@@ -3,13 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[System.Serializable]
-public class InteractEntry
-{
-    public GameObject triggerObject;
-    public List<GameObject> activateObjects;
-}
-
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController2D : MonoBehaviour
 {
@@ -22,7 +15,7 @@ public class PlayerController2D : MonoBehaviour
 
     [Header("Chaos Trackers")]
     [Tooltip("Drag the 4 objects whose active state drives the chaos effects.")]
-    public List<GameObject> chaosObjects;  // exactly 4 expected
+    public List<GameObject> chaosObjects;
 
     private Rigidbody2D rb;
     private float horizontal;
@@ -31,10 +24,8 @@ public class PlayerController2D : MonoBehaviour
 
     private HashSet<GameObject> touchingTriggers = new HashSet<GameObject>();
 
-    // delayed input state
-    private float pendingHorizontal = 0f;
-    private bool pendingJump = false;
-    private Coroutine delayCoroutine;
+    private bool lastKeyA = false;
+    private bool lastKeyD = false;
 
     void Awake()
     {
@@ -48,39 +39,48 @@ public class PlayerController2D : MonoBehaviour
 
         int chaosLevel = GetChaosLevel();
 
-        // --- read raw input ---
         float rawHorizontal = 0f;
         if (keyboard.aKey.isPressed) rawHorizontal = -1f;
         if (keyboard.dKey.isPressed) rawHorizontal = 1f;
 
         bool rawJump = keyboard.wKey.wasPressedThisFrame && isGrounded;
 
-        // chaos 3: reverse A/D
-        if (chaosLevel >= 3)
+        // chaos 1: reverse A/D
+        if (chaosLevel >= 1)
             rawHorizontal = -rawHorizontal;
 
-        // chaos 2: 50% chance input is swallowed entirely
-        if (chaosLevel >= 2 && Random.value < 0.5f)
+        // chaos 2: 30% chance input is swallowed
+        if (chaosLevel >= 2 && Random.value < 0.3f)
         {
             rawHorizontal = 0f;
             rawJump = false;
         }
 
-        // chaos 1: delay input by 1 second
-        if (chaosLevel >= 1)
+        // chaos 3: delay input by 0.3s
+        if (chaosLevel >= 3)
         {
-            if (delayCoroutine != null) StopCoroutine(delayCoroutine);
-            delayCoroutine = StartCoroutine(DelayInput(rawHorizontal, rawJump, 1f));
+            bool currentA = keyboard.aKey.isPressed;
+            bool currentD = keyboard.dKey.isPressed;
+            bool inputChanged = (currentA != lastKeyA) || (currentD != lastKeyD);
+
+            if (inputChanged)
+            {
+                lastKeyA = currentA;
+                lastKeyD = currentD;
+                StartCoroutine(DelayInput(rawHorizontal, 0.3f));
+            }
+
+            if (rawJump)
+                StartCoroutine(DelayJump(0.3f));
         }
         else
         {
-            // no chaos — apply immediately
             horizontal = rawHorizontal;
             if (rawJump)
                 rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
         }
 
-        // --- interact ---
+        // interact
         if (keyboard.fKey.wasPressedThisFrame && touchingTriggers.Count > 0)
         {
             foreach (var entry in interactEntries)
@@ -99,7 +99,6 @@ public class PlayerController2D : MonoBehaviour
         rb.linearVelocity = new Vector2(horizontal * moveSpeed, rb.linearVelocity.y);
     }
 
-    // --- chaos level: count how many chaosObjects are active ---
     int GetChaosLevel()
     {
         int count = 0;
@@ -108,15 +107,19 @@ public class PlayerController2D : MonoBehaviour
         return count;
     }
 
-    IEnumerator DelayInput(float h, bool jump, float delay)
+    IEnumerator DelayInput(float h, float delay)
     {
         yield return new WaitForSeconds(delay);
         horizontal = h;
-        if (jump && isGrounded)
+    }
+
+    IEnumerator DelayJump(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (isGrounded)
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
     }
 
-    // --- collision ---
     void OnCollisionEnter2D(Collision2D col)
     {
         groundCount++;
